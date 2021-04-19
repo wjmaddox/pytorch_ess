@@ -54,7 +54,7 @@ class LinConEllipticalSliceSampler:
         positive direction. If a slice crosses theta=0, the first angle is appended at the end of the array.
         Every row of the returned array defines a slice for elliptical slice sampling.
         """
-        delta_theta = 1.e-5 * 2.*math.pi
+        delta_theta = 1.e-6 * 2.*math.pi
         theta = self.intersection_angles(x0, x1)
 
         active_directions = self._find_active_directions(theta, x0, x1, delta_theta)
@@ -66,11 +66,18 @@ class LinConEllipticalSliceSampler:
             active_directions = self._find_active_directions(theta, x0, x1, delta_theta)
             theta_active = theta[active_directions!=0]
 
-        nonzero_active_directions = active_directions[active_directions!=0]
-        if nonzero_active_directions.shape != torch.Size([0]) and nonzero_active_directions[0] == -1:
-            theta_active = torch.cat((theta_active[1:].view(-1), theta_active[0].view(-1)))
+        if theta_active.numel() == 0:
+            theta_active = torch.tensor([0., 2 * math.pi], device = theta.device, dtype=theta.dtype)
+        else:
+            nonzero_active_directions = active_directions[active_directions!=0]
+            if nonzero_active_directions.shape != torch.Size([0]) and nonzero_active_directions[0] == -1:
+                theta_active = torch.cat((theta_active[1:].view(-1), theta_active[0].view(-1)))
 
-        return theta_active
+        if theta_active.shape[0] > 0:
+            return theta_active
+        else:
+            # print(theta.stop)
+            return theta[0].view(-1)
 
     def intersection_angles(self, x0, x1) -> torch.Tensor:
         """ Compute all of the up to 2M intersections of the ellipse and the linear constraints """
@@ -109,8 +116,10 @@ class LinConEllipticalSliceSampler:
         rotation_lengths = rotation_slices[:, 1] - rotation_slices[:, 0]
 
         # now construct the rotation angle
-        cum_lengths = torch.cat((torch.zeros(1, device = rotation_lengths.device, dtype=rotation_lengths.dtype), 
-            torch.cumsum(rotation_lengths)))
+        cum_lengths = torch.cat((
+            torch.zeros(1, device = rotation_lengths.device, dtype=rotation_lengths.dtype), 
+            torch.cumsum(rotation_lengths, 0),
+        ))
         random_angle = torch.rand(1) * cum_lengths[-1]
         idx = torch.searchsorted(cum_lengths, random_angle) - 1
         t_new = rotation_slices[idx, 0] + random_angle - cum_lengths[idx] + rotation_angle
@@ -126,7 +135,7 @@ class LinConEllipticalSliceSampler:
             if ii > 0:
                 f_cur = self.f_sampled[:,ii-1]
 
-            self.f_sampled[:, ii] = self.elliptical_slice(f_cur)
+            self.f_sampled[:, ii] = self.elliptical_slice(f_cur).squeeze(-1)
 
         # no reasn to return log prob
         return self.f_sampled, None
